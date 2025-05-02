@@ -1,12 +1,12 @@
 {
-    "display_name": "KeySwitcher (Dynamic Sets)", // Changed name
-    "loading_order": 101, // Slightly later loading order (optional)
+    "display_name": "KeySwitcher (Dynamic Sets)",
+    "loading_order": 101,
     "requires": [],
     "optional": [],
-    "js": "KeySwitcher.js", // This should match the JS filename
+    "js": "KeySwitcher.js",
     "css": "",
-    "author": "no (modified by Assistant, Dynamic Ver)", // Optional change
-    "version": "1.3-dynamic", // Optional change
-    "homePage": "none", // Or update if you fork it
+    "author": "no (modified by Assistant, Dynamic Ver)",
+    "version": "1.3-dynamic",
+    "homePage": "none",
     "auto_update": true
 }
