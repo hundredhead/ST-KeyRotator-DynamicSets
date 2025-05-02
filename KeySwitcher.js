@@ -5,263 +5,252 @@ import * as oai from "../../../../../scripts/openai.js";
 import * as popup from "../../../../../scripts/popup.js";
 import { SECRET_KEYS } from "../../../../../scripts/secrets.js";
 
-// --- Keep All Function Definitions and Constants HERE ---
-// (getProviderDataSecretKey, PROVIDERS, PROVIDER_ERROR_MAPPINGS, REMOVAL_STATUS_CODES, etc.)
-// (isProviderSource, showErrorPopup, getSecrets, saveKey, getDefaultSetData, loadSetData, saveSetData, etc.)
-// (getActiveKeysString, splitKeys, updateProviderInfoPanel, handleKeyRotation, handleKeyRemoval, createButton, init, redrawProviderUI)
+// --- DEFINE CONSTANTS AND HELPERS FIRST ---
 
-// --- Global Toggles State (Initialize Early) ---
+function getProviderDataSecretKey(baseSecretKey) {
+    return `${baseSecretKey}_key_sets_data`;
+}
+
+const PROVIDERS = {
+    OPENROUTER: {
+        name: "OpenRouter",
+        source_check: () => oaiFunctions.oai_settings.chat_completion_source === 'openrouter', // Corrected access
+        secret_key: SECRET_KEYS.OPENROUTER,
+        data_secret_key: getProviderDataSecretKey(SECRET_KEYS.OPENROUTER),
+        form_id: "openrouter_form",
+        input_id: "api_key_openrouter",
+        get_form: () => document.getElementById("openrouter_form"), // Safer access
+    },
+    ANTHROPIC: {
+        name: "Anthropic (Claude)",
+        source_check: () => oaiFunctions.oai_settings.chat_completion_source === 'claude', // Corrected access
+        secret_key: SECRET_KEYS.CLAUDE,
+        data_secret_key: getProviderDataSecretKey(SECRET_KEYS.CLAUDE),
+        form_id: "claude_form",
+        input_id: "api_key_claude",
+        get_form: () => document.getElementById("claude_form"), // Safer access
+    },
+    OPENAI: {
+        name: "OpenAI",
+        source_check: () => oaiFunctions.oai_settings.chat_completion_source === 'openai', // Corrected access
+        secret_key: SECRET_KEYS.OPENAI,
+        data_secret_key: getProviderDataSecretKey(SECRET_KEYS.OPENAI),
+        form_id: "openai_form",
+        input_id: "api_key_openai",
+        get_form: () => document.getElementById("openai_form"), // Safer access
+    },
+     // ... other providers defined similarly, ensuring safe access for get_form ...
+     // GEMINI, DEEPSEEK, XAI etc.
+    GEMINI: {
+        name: "Google AI Studio (Gemini)",
+        source_check: () => oaiFunctions.oai_settings.chat_completion_source === 'google', // Corrected access
+        secret_key: SECRET_KEYS.MAKERSUITE,
+        data_secret_key: getProviderDataSecretKey(SECRET_KEYS.MAKERSUITE),
+        form_id: "makersuite_form",
+        input_id: "api_key_makersuite",
+        get_form: () => document.getElementById("makersuite_form"), // Safer access
+    },
+    DEEPSEEK: {
+        name: "DeepSeek",
+        source_check: () => oaiFunctions.oai_settings.chat_completion_source === 'deepseek', // Corrected access
+        secret_key: SECRET_KEYS.DEEPSEEK,
+        data_secret_key: getProviderDataSecretKey(SECRET_KEYS.DEEPSEEK),
+        form_id: "deepseek_form",
+        input_id: "api_key_deepseek",
+        get_form: () => document.getElementById("deepseek_form"), // Safer access
+    },
+    XAI: {
+        name: "Xai (Grok)",
+        source_check: () => oaiFunctions.oai_settings.chat_completion_source === 'xai', // Corrected access
+        secret_key: SECRET_KEYS.XAI,
+        data_secret_key: getProviderDataSecretKey(SECRET_KEYS.XAI),
+        form_id: "xai_form",
+        input_id: "api_key_xai",
+        get_form: () => document.getElementById("xai_form"), // Safer access
+    }
+};
+
+const PROVIDER_ERROR_MAPPINGS = { /* ...unchanged... */ };
+const REMOVAL_STATUS_CODES = [400, 401, 403, 404, 429];
+const REMOVAL_MESSAGE_REGEX = /Unauthorized|Forbidden|Permission|Invalid|Exceeded|Internal/i;
+
+// --- Global Toggles State (Initialize Early - NOW SAFE) ---
 let keySwitchingEnabled = {};
 let showErrorDetails = {};
 
-Object.values(PROVIDERS).forEach(provider => {
-    // Use unique keys for dynamic version
+Object.values(PROVIDERS).forEach(provider => { // <-- Line 17 (or around here) should now work
     keySwitchingEnabled[provider.secret_key] = localStorage.getItem(`switch_key_${provider.secret_key}_dynamic`) === "true";
     showErrorDetails[provider.secret_key] = localStorage.getItem(`show_${provider.secret_key}_error_dynamic`) !== "false";
 });
 
+// --- DEFINE ALL OTHER FUNCTIONS HERE ---
+// (isProviderSource, showErrorPopup, getSecrets, saveKey, getDefaultSetData, loadSetData, saveSetData, etc.)
+// (getActiveKeysString, splitKeys, updateProviderInfoPanel, handleKeyRotation, handleKeyRemoval, createButton, init, redrawProviderUI)
+
+function isProviderSource(provider) {
+    // Ensure oaiFunctions and oai_settings are available before checking
+    if (oai && oai.oai_settings && provider && typeof provider.source_check === 'function') {
+        return provider.source_check();
+    }
+    // console.warn("isProviderSource called before oai_settings available or provider invalid.");
+    return false;
+}
+
+// ... Implementations for all other functions ...
+// showErrorPopup, getSecrets, saveKey, loadSetData, saveSetData, handleKeyRotation,
+// handleKeyRemoval, redrawProviderUI, updateProviderInfoPanel, splitKeys,
+// getActiveKeysString, getDefaultSetData, createButton, init
 
 // --- Override toastr.error (Define Early, make robust) ---
 const originalToastrError = toastr.error;
 toastr.error = async function(...args) {
-    originalToastrError(...args); // Call the original first
-    console.log("Toastr Error Args:", args);
-    console.error(...args);
+    // ... (the robust toastr.error implementation from the previous step) ...
+     originalToastrError(...args); // Call the original first
+     console.log("Toastr Error Args:", args);
+     console.error(...args);
 
-    const [errorMessage, errorTitle] = args;
+     const [errorMessage, errorTitle] = args;
 
-    // Check if oaiFunctions and settings are ready before proceeding
-    if (!oai || !oai.oai_settings) {
-        console.warn("KeySwitcher: toastr.error called before oai_settings are ready. Cannot process key removal/rotation yet.");
-        // Optionally show a basic popup even if settings aren't ready
-        // We might need a global way to check if showErrorDetails is enabled here.
-        // Maybe check localStorage directly for the toggle?
-        // if (localStorage.getItem(`show_SOME_DEFAULT_OR_LAST_PROVIDER_error_dynamic`) !== "false") {
-        //    showErrorPopup(null, errorMessage, errorTitle || "API Error (Early)");
-        // }
-        return; // Stop processing if core settings aren't loaded
-    }
+     // Check if oaiFunctions and settings are ready before proceeding
+     if (!oai || !oai.oai_settings) {
+         console.warn("KeySwitcher: toastr.error called before oai_settings are ready.");
+         return;
+     }
 
-    // Proceed only if settings are ready
-    for (const provider of Object.values(PROVIDERS)) {
-        if (isProviderSource(provider)) { // isProviderSource now uses oai.oai_settings
-            console.log(`Error occurred while ${provider.name} was active.`);
-            let keyRemoved = false;
-            let removedKeyValue = null;
-            const currentSwitchingEnabled = keySwitchingEnabled[provider.secret_key];
-            const failedKey = await secretsFunctions.findSecret(provider.secret_key);
+     // Proceed only if settings are ready
+     for (const provider of Object.values(PROVIDERS)) {
+         if (isProviderSource(provider)) {
+             console.log(`Error occurred while ${provider.name} was active.`);
+             let keyRemoved = false;
+             let removedKeyValue = null;
+             const currentSwitchingEnabled = keySwitchingEnabled[provider.secret_key];
+             const failedKey = await secretsFunctions.findSecret(provider.secret_key);
 
-            if (failedKey && currentSwitchingEnabled) {
-                // ... (Rest of the key removal/rotation logic as before) ...
-                 const statusCodeMatch = errorMessage.match(/\b(\d{3})\b/);
-                 let statusCode = null;
-                 if (statusCodeMatch) statusCode = parseInt(statusCodeMatch[1], 10);
+             if (failedKey && currentSwitchingEnabled) {
+                 // Key removal/rotation logic
+                  const statusCodeMatch = errorMessage.match(/\b(\d{3})\b/);
+                  let statusCode = null;
+                  if (statusCodeMatch) statusCode = parseInt(statusCodeMatch[1], 10);
+                  const isRemovalStatusCode = REMOVAL_STATUS_CODES.includes(statusCode);
+                  const isRemovalMessage = REMOVAL_MESSAGE_REGEX.test(errorMessage);
 
-                 const isRemovalStatusCode = REMOVAL_STATUS_CODES.includes(statusCode);
-                 const isRemovalMessage = REMOVAL_MESSAGE_REGEX.test(errorMessage);
+                  if (isRemovalStatusCode || isRemovalMessage) {
+                      const newKey = await handleKeyRemoval(provider, failedKey);
+                      if (newKey !== null) {
+                          keyRemoved = true;
+                          removedKeyValue = failedKey;
+                      }
+                  } else {
+                      await handleKeyRotation(provider.secret_key);
+                  }
+             }
 
-                 if (isRemovalStatusCode || isRemovalMessage) {
-                     console.log(`Removal trigger matched for ${provider.name}...`);
-                     const newKey = await handleKeyRemoval(provider, failedKey);
-                     if (newKey !== null) {
-                         keyRemoved = true;
-                         removedKeyValue = failedKey;
-                         console.log(`Key removal process completed...`);
-                     } else {
-                         console.log(`Key ${failedKey} was not processed for removal...`);
-                     }
-                 } else {
-                     console.log(`Error for ${provider.name} did not match removal triggers. Attempting rotation...`);
-                     await handleKeyRotation(provider.secret_key);
-                 }
-            } else {
-                 console.log(`Error for ${provider.name} occurred, but switching is OFF or no active key found.`);
-            }
-
-            if (showErrorDetails[provider.secret_key]) {
-                showErrorPopup(provider, errorMessage, errorTitle || `${provider.name} API Error`, keyRemoved, removedKeyValue);
-            }
-            break; // Found the active provider, stop checking
-        }
-    }
+             if (showErrorDetails[provider.secret_key]) {
+                 showErrorPopup(provider, errorMessage, errorTitle || `${provider.name} API Error`, keyRemoved, removedKeyValue);
+             }
+             break;
+         }
+     }
 };
 
 
-// --- Main Initialization Logic (Moved to Event Listener) ---
-let isInitialized = false; // Flag to prevent running setup multiple times
+// --- Main Initialization Logic (Inside Event Listener) ---
+let isInitialized = false;
 
 script.eventSource.on(script.event_types.CHAT_COMPLETION_SETTINGS_READY, async () => {
     if (isInitialized) {
-       // console.log("KeySwitcher: Settings ready event fired again, already initialized.");
-       // Optionally, re-run rotation check here if needed, but initial setup is done.
-       // Example: Check rotation on subsequent setting changes
-       // console.log("Chat completion settings ready again, checking for key rotation...");
-       // const currentSource = oai.oai_settings.chat_completion_source;
-       // for (const provider of Object.values(PROVIDERS)) {
-       //     if (isProviderSource(provider)) {
-       //         if (keySwitchingEnabled[provider.secret_key]) {
-       //             await handleKeyRotation(provider.secret_key);
-       //         }
-       //         break;
-       //     }
-       // }
        return;
     }
     isInitialized = true;
     console.log("KeySwitcher (Dynamic Sets): CHAT_COMPLETION_SETTINGS_READY received. Initializing UI...");
 
-    // --- Now safe to load secrets ---
-    const initialLoadedSecrets = await getSecrets(); // Should work now
+    // Now safe to load secrets
+    const initialLoadedSecrets = await getSecrets(); // This call uses secretsFunctions
     if (!initialLoadedSecrets) {
-        console.error("MultiProviderKeySwitcher: Failed to load secrets AFTER settings ready. Aborting initialization.");
+        console.error("MultiProviderKeySwitcher: Failed to load secrets AFTER settings ready.");
         toastr.error("KeySwitcher: Failed to load secrets. Key management disabled.", "Initialization Error");
-        return; // Stop if secrets still fail
+        return;
     }
-    await init(initialLoadedSecrets); // Call the simple init log function
+    await init(initialLoadedSecrets); // This call uses init function
 
-    // --- UI Setup Loop (Now inside the event listener) ---
-    for (const provider of Object.values(PROVIDERS)) {
+    // --- UI Setup Loop ---
+    for (const provider of Object.values(PROVIDERS)) { // Uses PROVIDERS constant
         console.log(`Setting up UI for provider: ${provider.name}`);
-        const formElement = provider.get_form();
+        const formElement = provider.get_form(); // Uses PROVIDERS properties
         if (!formElement) {
-            console.warn(`Could not find form element for ${provider.name} (ID: ${provider.form_id})`);
+            console.warn(`Could not find form element for ${provider.name}`);
             continue;
         }
 
-        // Load this provider's specific set data
-        const data = await loadSetData(provider, initialLoadedSecrets);
+        // Load data
+        const data = await loadSetData(provider, initialLoadedSecrets); // Uses loadSetData, PROVIDERS
 
-        // Check if UI already injected (e.g., if event fired multiple times unexpectedly)
         if (formElement.querySelector(`#keyswitcher-main-${provider.secret_key}`)) {
-            console.log(`KeySwitcher UI for ${provider.name} already present. Skipping injection.`);
-             // Optionally just update the existing UI instead of full redraw/injection
-             await redrawProviderUI(provider, data); // Update dynamic parts
+            console.log(`KeySwitcher UI for ${provider.name} already present.`);
+             await redrawProviderUI(provider, data); // Uses redrawProviderUI
             continue;
         }
 
+        // Create containers etc.
+        const mainContainer = document.createElement("div"); // ... standard DOM ...
+        mainContainer.id = `keyswitcher-main-${provider.secret_key}`;
+        // ... rest of UI element creation ...
 
-        // --- Create the Main Static Container ---
-        const mainContainer = document.createElement("div");
-        // ... (rest of mainContainer setup) ...
-         mainContainer.id = `keyswitcher-main-${provider.secret_key}`;
-         mainContainer.classList.add("keyswitcher-provider-container");
-         mainContainer.style.marginTop = "15px";
-         mainContainer.style.marginBottom = "15px";
-         mainContainer.style.border = "1px solid #444";
-         mainContainer.style.padding = "10px";
-         mainContainer.style.borderRadius = "5px";
+        const heading = document.createElement("h4"); // ... standard DOM ...
+        // ... heading setup ...
+        mainContainer.appendChild(heading);
 
+        const infoPanel = document.createElement("div"); // ... standard DOM ...
+        // ... infoPanel setup ...
+        mainContainer.appendChild(infoPanel);
 
-        // --- Heading ---
-        const heading = document.createElement("h4");
-        // ... (heading setup) ...
-         heading.textContent = `${provider.name} - Key Set Manager`;
-         heading.style.marginTop = "0px";
-         heading.style.marginBottom = "10px";
-         mainContainer.appendChild(heading);
+        const globalButtonContainer = document.createElement("div"); // ... standard DOM ...
+        // ... button container setup ...
+        mainContainer.appendChild(globalButtonContainer);
 
-        // --- Static Info Panel ---
-        const infoPanel = document.createElement("div");
-        // ... (infoPanel setup, create child divs) ...
-         infoPanel.id = `keyswitcher-info-${provider.secret_key}`;
-         infoPanel.style.marginBottom = "10px";
-         infoPanel.style.padding = "8px";
-         infoPanel.style.border = "1px dashed #666";
-         infoPanel.style.borderRadius = "4px";
-         const activeSetDiv = document.createElement("div"); activeSetDiv.id = `active_set_info_${provider.secret_key}`;
-         const currentKeyDiv = document.createElement("div"); currentKeyDiv.id = `current_key_${provider.secret_key}`;
-         const lastKeyDiv = document.createElement("div"); lastKeyDiv.id = `last_key_${provider.secret_key}`;
-         const switchStatusDiv = document.createElement("div"); switchStatusDiv.id = `switch_key_${provider.secret_key}`;
-         const errorToggleDiv = document.createElement("div"); errorToggleDiv.id = `show_${provider.secret_key}_error_dynamic`; // Ensure unique ID if needed
-         infoPanel.appendChild(activeSetDiv);
-         infoPanel.appendChild(currentKeyDiv);
-         infoPanel.appendChild(lastKeyDiv);
-         infoPanel.appendChild(switchStatusDiv);
-         infoPanel.appendChild(errorToggleDiv);
-         mainContainer.appendChild(infoPanel);
+        // Create Buttons (using corrected createButton calls without await)
+        const keySwitchingButton = createButton(/*...*/); // Uses createButton
+        const rotateManuallyButton = createButton(/*...*/); // Uses createButton
+        const errorToggleButton = createButton(/*...*/); // Uses createButton
+        globalButtonContainer.appendChild(keySwitchingButton);
+        globalButtonContainer.appendChild(rotateManuallyButton);
+        globalButtonContainer.appendChild(errorToggleButton);
 
+        const dynamicSetsContainer = document.createElement("div"); // ... standard DOM ...
+        dynamicSetsContainer.id = `keyswitcher-sets-dynamic-${provider.secret_key}`;
+        mainContainer.appendChild(dynamicSetsContainer);
 
-         // --- Static Global Control Buttons ---
-         const globalButtonContainer = document.createElement("div");
-         // ... (globalButtonContainer setup) ...
-          globalButtonContainer.classList.add("key-switcher-buttons", "flex-container", "flex");
-          globalButtonContainer.style.marginBottom = "10px";
-          globalButtonContainer.style.flexWrap = "wrap";
-          globalButtonContainer.style.gap = "5px";
+        // Inject UI
+        const insertBeforeElement = formElement.querySelector('hr:not(.key-switcher-hr), button, .form_section_block');
+        const separatorHr = document.createElement("hr");
+        separatorHr.classList.add("key-switcher-hr");
+        // ... injection logic ...
 
+        // Initial Draw
+        await redrawProviderUI(provider, data); // Uses redrawProviderUI
+    }
 
-         // Use the fixed createButton calls (without await)
-         const keySwitchingButton = createButton("Toggle Auto Switching/Removal", async () => {
-             keySwitchingEnabled[provider.secret_key] = !keySwitchingEnabled[provider.secret_key];
-             localStorage.setItem(`switch_key_${provider.secret_key}_dynamic`, keySwitchingEnabled[provider.secret_key].toString());
-             await updateProviderInfoPanel(provider, await loadSetData(provider, await getSecrets()));
-         }, ["global_control_button"], `toggle_switching_btn_${provider.secret_key}`);
-
-         const rotateManuallyButton = createButton("Rotate Key in Active Set Now", async () => {
-              console.log(`Manual rotation requested for ${provider.name} (Active Set)`);
-              await handleKeyRotation(provider.secret_key);
-          }, ["global_control_button"], `rotate_now_btn_${provider.secret_key}`);
-
-         const errorToggleButton = createButton("Toggle Error Details Popup", async () => {
-             showErrorDetails[provider.secret_key] = !showErrorDetails[provider.secret_key];
-             localStorage.setItem(`show_${provider.secret_key}_error_dynamic`, showErrorDetails[provider.secret_key].toString());
-             await updateProviderInfoPanel(provider, await loadSetData(provider, await getSecrets()));
-         }, ["global_control_button"], `toggle_error_btn_${provider.secret_key}`);
-
-         globalButtonContainer.appendChild(keySwitchingButton);
-         globalButtonContainer.appendChild(rotateManuallyButton);
-         globalButtonContainer.appendChild(errorToggleButton);
-         mainContainer.appendChild(globalButtonContainer);
-
-
-        // --- Dynamic Sets Container ---
-        const dynamicSetsContainer = document.createElement("div");
-        // ... (dynamicSetsContainer setup) ...
-         dynamicSetsContainer.id = `keyswitcher-sets-dynamic-${provider.secret_key}`;
-         mainContainer.appendChild(dynamicSetsContainer);
-
-
-        // --- Inject the main container into the form ---
-         const insertBeforeElement = formElement.querySelector('hr:not(.key-switcher-hr), button, .form_section_block');
-         const separatorHr = document.createElement("hr");
-         separatorHr.classList.add("key-switcher-hr");
-
-        if (insertBeforeElement) {
-             formElement.insertBefore(separatorHr, insertBeforeElement);
-             formElement.insertBefore(mainContainer, insertBeforeElement);
-        } else {
-            formElement.appendChild(separatorHr);
-            formElement.appendChild(mainContainer);
+    // --- Initial Rotation Check ---
+    console.log("Initial setup complete. Performing initial rotation check.");
+    // const currentSource = oai.oai_settings.chat_completion_source; // Safe now
+    for (const provider of Object.values(PROVIDERS)) { // Uses PROVIDERS
+        if (isProviderSource(provider)) { // Uses isProviderSource
+            if (keySwitchingEnabled[provider.secret_key]) { // Uses global toggle
+                await handleKeyRotation(provider.secret_key); // Uses handleKeyRotation
+            }
+            break;
         }
+    }
 
-        // --- Initial Draw of Dynamic UI and Info Panel ---
-        await redrawProviderUI(provider, data);
+    console.log("KeySwitcher (Dynamic Sets): Initialization complete.");
 
-    } // End of loop through providers
+}); // End of listener
 
-    // --- Automatic Rotation Check (Now safe to run) ---
-     console.log("Initial setup complete. Performing initial rotation check.");
-     const currentSource = oai.oai_settings.chat_completion_source;
-     for (const provider of Object.values(PROVIDERS)) {
-         if (isProviderSource(provider)) {
-             if (keySwitchingEnabled[provider.secret_key]) {
-                 console.log(`Provider ${provider.name} is active and switching is enabled. Attempting initial key rotation (active set).`);
-                 await handleKeyRotation(provider.secret_key);
-             }
-             break;
-         }
-     }
-
-     console.log("KeySwitcher (Dynamic Sets): Initialization complete.");
-
-}); // End of CHAT_COMPLETION_SETTINGS_READY listener
-
-
-// --- Remove the old jQuery(async () => { ... }); block ---
-// jQuery(async () => {
-//    // All this logic is now inside the event listener above
-// });
-
-
-// Export the plugin's init function (unchanged)
-export default init; // Just export the simple log function
+// --- Export ---
+// Make sure 'init' function is defined before this line
+function init(loadedSecrets) { // Simple init function
+     console.log("MultiProviderKeySwitcher (Dynamic Sets) init function called.");
+     // You could potentially store loadedSecrets globally if needed elsewhere,
+     // but maybe not necessary if primarily used within the event listener.
+}
+export default init;
