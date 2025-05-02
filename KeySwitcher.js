@@ -481,6 +481,191 @@ async function updateProviderInfoPanel(provider, data) {
     } else console.warn(`KeySwitcher: Could not find errorToggleDiv for ${provider.name}`);
 }
 
+/**
+ * Redraws the dynamic UI section for managing key sets for a specific provider.
+ * This includes the list of sets, textareas for keys, and management buttons.
+ *
+ * @param {object} provider The provider object from PROVIDERS.
+ * @param {object} data The current structured data object for this provider (from loadSetData).
+ */
+async function redrawProviderUI(provider, data) {
+    const dynamicContainerId = `keyswitcher-sets-dynamic-${provider.secret_key}`;
+    const dynamicContainer = document.getElementById(dynamicContainerId);
+
+    if (!dynamicContainer) {
+        console.error(`KeySwitcher: Dynamic container not found for ${provider.name} (ID: ${dynamicContainerId})`);
+        return;
+    }
+
+    // --- Clear existing UI ---
+    dynamicContainer.innerHTML = '';
+
+    // --- Add Separator & Header for Sets Area ---
+    const setsAreaHeader = document.createElement("h5");
+    setsAreaHeader.textContent = "Key Sets:";
+    setsAreaHeader.style.marginTop = "15px";
+    setsAreaHeader.style.marginBottom = "5px";
+    dynamicContainer.appendChild(document.createElement("hr")); // Separator above the sets
+    dynamicContainer.appendChild(setsAreaHeader);
+
+    // --- Iterate and Draw Each Set ---
+    if (!data.sets || data.sets.length === 0) {
+        const noSetsMessage = document.createElement('p');
+        noSetsMessage.textContent = "No key sets defined. Click 'Add New Set' to create one.";
+        noSetsMessage.style.fontStyle = "italic";
+        dynamicContainer.appendChild(noSetsMessage);
+    } else {
+        data.sets.forEach((set, index) => {
+            const setContainer = document.createElement("div");
+            setContainer.classList.add("keyswitcher-set-item");
+            setContainer.style.border = "1px solid #555";
+            setContainer.style.borderRadius = "4px";
+            setContainer.style.padding = "10px";
+            setContainer.style.marginBottom = "10px";
+            if (index === data.activeSetIndex) {
+                setContainer.style.borderColor = "#8cff7a"; // Highlight active set
+                setContainer.style.boxShadow = "0 0 5px #8cff7a";
+            }
+
+            // Set Header (Name & Buttons)
+            const setHeader = document.createElement("div");
+            setHeader.style.display = "flex";
+            setHeader.style.justifyContent = "space-between";
+            setHeader.style.alignItems = "center";
+            setHeader.style.marginBottom = "8px";
+
+            const setName = document.createElement("strong");
+            setName.textContent = `${set.name} ${index === data.activeSetIndex ? '(Active)' : ''}`;
+            // TODO: Add rename functionality here later by making setName editable
+
+            const setButtons = document.createElement("div");
+            setButtons.style.display = "flex";
+            setButtons.style.gap = "5px";
+
+            // Activate Button (only if not already active)
+            if (index !== data.activeSetIndex) {
+                const activateButton = createButton("Activate Set", async () => {
+                    console.log(`KeySwitcher: Activating set ${index} ('${set.name}') for ${provider.name}`);
+                    data.activeSetIndex = index;
+                    await saveSetData(provider, data); // Save the new active index
+                    await handleKeyRotation(provider.secret_key); // Trigger rotation to (potentially) set the first key of the new active set
+                    // We need to reload data and redraw everything
+                    const updatedSecrets = await getSecrets();
+                    if (updatedSecrets) {
+                        const updatedData = loadSetData(provider, updatedSecrets);
+                        await updateProviderInfoPanel(provider, updatedData); // Update static panel
+                        await redrawProviderUI(provider, updatedData);       // Redraw dynamic section
+                    }
+                });
+                setButtons.appendChild(activateButton);
+            }
+
+            // Delete Button (disable if only one set exists)
+            const deleteButton = createButton("Delete Set", async () => {
+                if (confirm(`Are you sure you want to delete the key set "${set.name}"? This cannot be undone.`)) {
+                    console.log(`KeySwitcher: Deleting set ${index} ('${set.name}') for ${provider.name}`);
+                    data.sets.splice(index, 1); // Remove the set from the array
+
+                    // Adjust activeSetIndex if needed
+                    if (data.activeSetIndex === index) {
+                        // If deleting the active set, default to the first set (index 0)
+                        data.activeSetIndex = 0;
+                        console.log("KeySwitcher: Deleted active set, setting set 0 as new active.");
+                    } else if (data.activeSetIndex > index) {
+                        // If deleting a set before the active one, shift the active index down
+                        data.activeSetIndex--;
+                         console.log("KeySwitcher: Deleted set before active set, adjusting active index.");
+                    }
+
+                    // Ensure at least one set remains (create default if necessary)
+                    if (data.sets.length === 0) {
+                         console.log("KeySwitcher: Last set deleted, creating a new default set.");
+                        data.sets.push({ name: "Default", keys: "" });
+                        data.activeSetIndex = 0;
+                    }
+
+                    await saveSetData(provider, data); // Save changes
+
+                    // Reload and redraw UI completely
+                    const updatedSecrets = await getSecrets();
+                    if (updatedSecrets) {
+                        const updatedData = loadSetData(provider, updatedSecrets);
+                        // Trigger rotation for the (potentially new) active set
+                        await handleKeyRotation(provider.secret_key);
+                        await updateProviderInfoPanel(provider, updatedData);
+                        await redrawProviderUI(provider, updatedData);
+                    }
+                }
+            });
+            if (data.sets.length <= 1) {
+                deleteButton.disabled = true; // Cannot delete the last set
+                deleteButton.title = "Cannot delete the only set.";
+                deleteButton.style.opacity = "0.5";
+                deleteButton.style.cursor = "not-allowed";
+            }
+            setButtons.appendChild(deleteButton);
+
+            // TODO: Add Rename button later
+
+
+            setHeader.appendChild(setName);
+            setHeader.appendChild(setButtons);
+            setContainer.appendChild(setHeader);
+
+            // Keys Textarea
+            const keysTextarea = document.createElement("textarea");
+            keysTextarea.classList.add("text_pole", "api_key_textarea"); // Use similar styling
+            keysTextarea.rows = 4; // Adjust as needed
+            keysTextarea.placeholder = `Enter API keys for set "${set.name}", one per line or separated by semicolons.`;
+            keysTextarea.value = set.keys || "";
+            keysTextarea.style.width = "100%"; // Ensure it fills container
+            keysTextarea.style.boxSizing = 'border-box'; // Include padding/border in width
+
+            // Save keys on blur (when textarea loses focus)
+            keysTextarea.addEventListener('blur', async (event) => {
+                const newKeys = event.target.value.trim();
+                if (set.keys !== newKeys) {
+                    console.log(`KeySwitcher: Updating keys for set ${index} ('${set.name}') for ${provider.name}`);
+                    set.keys = newKeys; // Update in the local data object first
+                    data.sets[index].keys = newKeys; // Ensure parent data obj is updated too
+                    await saveSetData(provider, data); // Save the whole data structure
+
+                    // If these were keys for the *active* set, trigger rotation logic
+                    // in case the currently active key was removed or changed.
+                    if (index === data.activeSetIndex) {
+                         console.log("KeySwitcher: Keys updated for the active set. Triggering rotation check.");
+                        await handleKeyRotation(provider.secret_key); // This will update the info panel too
+                    }
+                }
+            });
+
+            setContainer.appendChild(keysTextarea);
+            dynamicContainer.appendChild(setContainer);
+        });
+    }
+
+    // --- Add "New Set" Button ---
+    const addNewSetButton = createButton("Add New Set", async () => {
+        const newSetName = prompt("Enter a name for the new key set:", `Set ${data.sets.length + 1}`);
+        if (newSetName && newSetName.trim()) {
+            console.log(`KeySwitcher: Adding new set named '${newSetName}' for ${provider.name}`);
+            data.sets.push({ name: newSetName.trim(), keys: "" });
+            await saveSetData(provider, data); // Save the new set
+            // Reload and redraw UI
+            const updatedSecrets = await getSecrets();
+             if (updatedSecrets) {
+                 const updatedData = loadSetData(provider, updatedSecrets);
+                 await updateProviderInfoPanel(provider, updatedData); // Update just in case (though unlikely to change)
+                 await redrawProviderUI(provider, updatedData);       // Redraw dynamic section
+             }
+        } else if (newSetName !== null) { // Check if prompt was cancelled vs empty input
+            alert("Set name cannot be empty.");
+        }
+    });
+    addNewSetButton.style.marginTop = "10px";
+    dynamicContainer.appendChild(addNewSetButton);
+}
+
 
 // --- Main Initialization Logic ---
 jQuery(async () => {
@@ -653,8 +838,9 @@ jQuery(async () => {
                 // --- Call initial Info Panel update ---
                 await updateProviderInfoPanel(provider, data);
 
-                // --- Call placeholder for dynamic UI draw (to be implemented next) ---
-                // await redrawProviderUI(provider, data); // <- Will add this call later
+                // --- Call initial Dynamic UI draw --- ADDED ---
+                await redrawProviderUI(provider, data);
+
 
 
             } catch (injectionError) {
