@@ -518,7 +518,7 @@ async function redrawProviderUI(provider, data) {
 
         // Remove Set Button (only if more than one set exists)
         if (data.sets.length > 1) {
-            const removeSetButton = await createButton("Remove", async () => {
+            const removeSetButton = createButton("Remove", async () => {
                 if (!confirm(`Are you sure you want to remove Set ${index} ("${set.name}")?`)) return;
 
                 const removedSetName = data.sets[index].name;
