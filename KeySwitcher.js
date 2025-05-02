@@ -495,7 +495,7 @@ async function redrawProviderUI(provider, data) {
 
         // Set Active Button (only if not already active)
         if (index !== data.activeSetIndex) {
-            const setActiveButton = await createButton("Set Active", async () => {
+            const setActiveButton = createButton("Set Active", async () => {
                 data.activeSetIndex = index;
                 // Immediately set the first key of the NEW active set as the main key
                 const newActiveKeys = splitKeys(data.sets[index].keys);
