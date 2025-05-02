@@ -559,7 +559,7 @@ async function redrawProviderUI(provider, data) {
     });
 
     // "Add New Set" Button (always present below the sets)
-    const addNewSetButton = await createButton("Add New Key Set", async () => {
+    const addNewSetButton = createButton("Add New Key Set", async () => {
         data.sets.push({ name: `Set ${data.sets.length}`, keys: "" }); // Add default empty set
         await saveSetData(provider, data);
         await redrawProviderUI(provider, data); // Redraw to include the new set
@@ -703,20 +703,20 @@ jQuery(async () => {
          globalButtonContainer.style.flexWrap = "wrap";
          globalButtonContainer.style.gap = "5px";
 
-         const keySwitchingButton = await createButton("Toggle Auto Switching/Removal", async () => {
+         const keySwitchingButton = createButton("Toggle Auto Switching/Removal", async () => {
              keySwitchingEnabled[provider.secret_key] = !keySwitchingEnabled[provider.secret_key];
             // Inside the keySwitchingButton onClick handler:
 			localStorage.setItem(`switch_key_${provider.secret_key}_dynamic`, keySwitchingEnabled[provider.secret_key].toString()); // <-- Added suffix
              await updateProviderInfoPanel(provider, await loadSetData(provider, await getSecrets())); // Update text
          }, ["global_control_button"], `toggle_switching_btn_${provider.secret_key}`);
 
-         const rotateManuallyButton = await createButton("Rotate Key in Active Set Now", async () => {
+         const rotateManuallyButton =  createButton("Rotate Key in Active Set Now", async () => {
               console.log(`Manual rotation requested for ${provider.name} (Active Set)`);
               await handleKeyRotation(provider.secret_key); // Rotates within active set
               // UI update handled within handleKeyRotation
           }, ["global_control_button"], `rotate_now_btn_${provider.secret_key}`);
 
-         const errorToggleButton = await createButton("Toggle Error Details Popup", async () => {
+         const errorToggleButton = createButton("Toggle Error Details Popup", async () => {
              showErrorDetails[provider.secret_key] = !showErrorDetails[provider.secret_key];
 			// Inside the errorToggleButton onClick handler:
 			localStorage.setItem(`show_${provider.secret_key}_error_dynamic`, showErrorDetails[provider.secret_key].toString()); // <-- Added suffix
