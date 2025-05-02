@@ -261,105 +261,79 @@ async function updateProviderInfoPanel(provider, data) {
 // jQuery ready function
 jQuery(async () => {
     // ... (Keep console.log, toastr.error override) ...
-
-    // Get secrets
     const loadedSecrets = await getSecrets() || {};
     await init(loadedSecrets);
 
     // Process each provider
     for (const provider of Object.values(PROVIDERS)) {
-        // ... (Keep processing log, get_form, form check) ...
+        console.log(`Processing provider: ${provider.name}`);
+        // *** ADD LOGGING HERE ***
+        const formElement = provider.get_form();
+        console.log(`>>> Result of get_form() for ${provider.name}:`, formElement); // Log what get_form returned
 
         if (formElement) {
-            const data = loadSetData(provider, loadedSecrets);
-            console.log(`${provider.name} initial set data:`, JSON.parse(JSON.stringify(data)));
+            // *** Try/Catch around UI modification ***
+            try {
+                const data = loadSetData(provider, loadedSecrets);
+                console.log(`${provider.name} initial set data:`, JSON.parse(JSON.stringify(data)));
 
-            // --- Create UI elements (topLevelContainer, heading, infoPanel placeholders, globalButtonContainer) ---
-            // ... (Keep this element creation part as it was in Step 1) ...
+                // --- Create UI elements ---
+                const topLevelContainer = document.createElement("div"); /* ... setup ... */
+                const heading = document.createElement("h4"); /* ... setup ... */
+                topLevelContainer.appendChild(heading);
+                const infoPanel = document.createElement("div"); /* ... setup ... */
+                infoPanel.id = `keyswitcher-info-${provider.secret_key}`;
+                 // (Add placeholder divs inside infoPanel)
+                 const activeSetDiv = document.createElement("div"); activeSetDiv.id = `active_set_info_${provider.secret_key}`; /*...*/ infoPanel.appendChild(activeSetDiv);
+                 const currentKeyDiv = document.createElement("div"); currentKeyDiv.id = `current_key_${provider.secret_key}`; /*...*/ infoPanel.appendChild(currentKeyDiv);
+                 const switchStatusDiv = document.createElement("div"); switchStatusDiv.id = `switch_key_${provider.secret_key}`; /*...*/ infoPanel.appendChild(switchStatusDiv);
+                 const errorToggleDiv = document.createElement("div"); errorToggleDiv.id = `show_${provider.secret_key}_error`; /*...*/ infoPanel.appendChild(errorToggleDiv);
+                topLevelContainer.appendChild(infoPanel);
+                const globalButtonContainer = document.createElement("div"); /* ... setup ... */
+                 // (Create and append global buttons, calling updateProviderInfoPanel in handlers)
+                 const keySwitchingButton = await createButton(/*...*/ async () => { /*...*/ await updateProviderInfoPanel(provider, loadSetData(provider, await getSecrets())); });
+                 const rotateManuallyButton = await createButton(/*...*/ async () => { /*...*/ await handleKeyRotation(/*...*/); await updateProviderInfoPanel(provider, loadSetData(provider, await getSecrets())); });
+                 const errorToggleButton = await createButton(/*...*/ async () => { /*...*/ await updateProviderInfoPanel(provider, loadSetData(provider, await getSecrets())); });
+                globalButtonContainer.appendChild(keySwitchingButton);
+                globalButtonContainer.appendChild(rotateManuallyButton);
+                globalButtonContainer.appendChild(errorToggleButton);
+                topLevelContainer.appendChild(globalButtonContainer);
+                const dynamicSetsContainer = document.createElement("div"); /* ... setup ... */
+                dynamicSetsContainer.id = `keyswitcher-sets-dynamic-${provider.secret_key}`;
+                topLevelContainer.appendChild(dynamicSetsContainer);
 
-            const topLevelContainer = document.createElement("div"); /* ... setup ... */
-            const heading = document.createElement("h4"); /* ... setup ... */
-            topLevelContainer.appendChild(heading);
+                // --- Inject UI ---
+                console.log(`Attempting to inject UI for ${provider.name}`); // Log before injection
+                const insertBeforeElement = formElement.querySelector('hr, button, .form_section_block');
+                const separatorHr = document.createElement("hr");
+                if (insertBeforeElement) {
+                    formElement.insertBefore(separatorHr, insertBeforeElement);
+                    formElement.insertBefore(topLevelContainer, separatorHr.nextSibling);
+                } else {
+                    formElement.appendChild(document.createElement("hr"));
+                    formElement.appendChild(topLevelContainer);
+                }
+                console.log(`UI Injected successfully for ${provider.name}`); // Log after injection
 
-            // Info panel - PLACEHOLDERS INSIDE
-            const infoPanel = document.createElement("div"); /* ... setup ... */
-            infoPanel.id = `keyswitcher-info-${provider.secret_key}`;
-             const activeSetDiv = document.createElement("div"); activeSetDiv.id = `active_set_info_${provider.secret_key}`; activeSetDiv.textContent = "Active Set: Loading...";
-             const currentKeyDiv = document.createElement("div"); currentKeyDiv.id = `current_key_${provider.secret_key}`; currentKeyDiv.textContent = "Current Key: Loading...";
-             const switchStatusDiv = document.createElement("div"); switchStatusDiv.id = `switch_key_${provider.secret_key}`; switchStatusDiv.textContent = "Switching: Loading..."; // Updated placeholder
-             const errorToggleDiv = document.createElement("div"); errorToggleDiv.id = `show_${provider.secret_key}_error`; errorToggleDiv.textContent = "Error Details: Loading..."; // Updated placeholder
-             infoPanel.appendChild(activeSetDiv);
-             infoPanel.appendChild(currentKeyDiv);
-             infoPanel.appendChild(switchStatusDiv);
-             infoPanel.appendChild(errorToggleDiv);
-            topLevelContainer.appendChild(infoPanel);
+                // --- Call initial update ---
+                await updateProviderInfoPanel(provider, data);
 
-            // Global Button container
-            const globalButtonContainer = document.createElement("div"); /* ... setup ... */
-
-            // --- Update GLOBAL buttons ---
-            const keySwitchingButton = await createButton("Toggle Auto Switching/Removal", async () => {
-                keySwitchingEnabled[provider.secret_key] = !keySwitchingEnabled[provider.secret_key];
-                localStorage.setItem(`switch_key_${provider.secret_key}`, keySwitchingEnabled[provider.secret_key].toString());
-                // Call the update function HERE
-                await updateProviderInfoPanel(provider, loadSetData(provider, await getSecrets())); // Reload data in case sets changed elsewhere
-            });
-
-            const rotateManuallyButton = await createButton("Rotate Key in Active Set Now", async () => {
-                 console.log(`Manual rotation requested for ${provider.name}`);
-                 // !!! Call WILL need updating after handleKeyRotation refactor !!!
-                 await handleKeyRotation(provider.secret_key);
-                 // Update panel after rotation attempt (even if it fails for now)
-                 await updateProviderInfoPanel(provider, loadSetData(provider, await getSecrets()));
-             });
-
-             const errorToggleButton = await createButton("Toggle Error Details Popup", async () => {
-                 showErrorDetails[provider.secret_key] = !showErrorDetails[provider.secret_key];
-                 localStorage.setItem(`show_${provider.secret_key}_error`, showErrorDetails[provider.secret_key].toString());
-                  // Call the update function HERE
-                 await updateProviderInfoPanel(provider, loadSetData(provider, await getSecrets()));
-             });
-
-            globalButtonContainer.appendChild(keySwitchingButton);
-            globalButtonContainer.appendChild(rotateManuallyButton);
-            globalButtonContainer.appendChild(errorToggleButton);
-            topLevelContainer.appendChild(globalButtonContainer);
-
-            // Dynamic Sets Container (placeholder)
-            const dynamicSetsContainer = document.createElement("div"); /* ... setup ... */
-            dynamicSetsContainer.id = `keyswitcher-sets-dynamic-${provider.secret_key}`;
-            topLevelContainer.appendChild(dynamicSetsContainer);
-
-            // --- Inject UI ---
-            // ... (Keep injection logic the same) ...
-            const insertBeforeElement = formElement.querySelector('hr, button, .form_section_block');
-            const separatorHr = document.createElement("hr");
-            if (insertBeforeElement) {
-                formElement.insertBefore(separatorHr, insertBeforeElement);
-                formElement.insertBefore(topLevelContainer, separatorHr.nextSibling);
-            } else {
-                formElement.appendChild(document.createElement("hr"));
-                formElement.appendChild(topLevelContainer);
+            } catch (injectionError) {
+                 console.error(`*** ERROR during UI creation/injection for ${provider.name}:`, injectionError);
+                 console.error(`formElement at time of error was:`, formElement); // Log formElement state if error occurs
             }
-
-            // --- Call initial update/draw functions --- ADDED / MODIFIED ---
-            await updateProviderInfoPanel(provider, data); // Call initial info panel update
-            // await redrawProviderUI(provider, data); // This will be created later to draw the actual set list UI
+            // *** End Try/Catch ***
 
         } else {
-             // ... (Keep warning log) ...
+             console.warn(`Could not find form element for ${provider.name} (ID: ${provider.form_id}). Skipping UI injection.`); // Enhanced warning
         }
     } // End of provider loop
 
-    // --- Event Listeners ---
-    // ... (Keep model changed listener) ...
-    // ... (Keep SETTINGS_READY listener - handleKeyRotation call still needs update) ...
+    // ... (Keep Event Listeners) ...
 
     console.log("MultiProviderKeySwitcher: Initialization complete.");
 });
 
-// ... (Keep export default exports.default;) ...
-
-
-// Export the plugin's init function
-export default exports.default;
+// *** Change the final line ***
+// export default exports.default; // REMOVE
+export default init; // ADD
