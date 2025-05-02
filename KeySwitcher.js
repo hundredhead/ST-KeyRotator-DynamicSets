@@ -225,17 +225,212 @@ function splitKeys(keysString) {
 
 // --- End Helper Functions for Set Data ---
 
-// --- Placeholder Core Logic Functions (Need Refactoring Later) ---
+// Handle key rotation for the ACTIVE SET of a specific provider
 async function handleKeyRotation(providerKey) {
-    console.warn("KeySwitcher: handleKeyRotation needs refactoring for set data!");
-    // TODO: Refactor this function to rotate keys within the ACTIVE SET based on data loaded via loadSetData
+    // Find the provider config using the main secret key
+    const provider = Object.values(PROVIDERS).find(p => p.secret_key === providerKey);
+    if (!provider) {
+        console.error(`KeySwitcher: handleKeyRotation called with unknown providerKey: ${providerKey}`);
+        return;
+    }
+
+    // Load the current set data for this provider
+    const loadedSecrets = await getSecrets();
+    if (!loadedSecrets) {
+        console.error(`KeySwitcher: Failed to get secrets during rotation for ${provider.name}`);
+        return; // Cannot proceed without secrets
+    }
+    const data = loadSetData(provider, loadedSecrets);
+
+    // Check if switching is enabled (might be redundant if called only when enabled, but good safety check)
+    if (!keySwitchingEnabled[provider.secret_key]) {
+        console.log(`KeySwitcher: Rotation skipped for ${provider.name}, switching is disabled.`);
+        return;
+    }
+
+    // Get the active set based on the index in data
+    const activeSetIndex = data.activeSetIndex;
+    const activeSet = data.sets[activeSetIndex];
+
+    if (!activeSet) {
+        console.error(`KeySwitcher: Active set index ${activeSetIndex} invalid for ${provider.name}. Cannot rotate.`);
+        return;
+    }
+
+    // Get the keys from the active set string
+    const keysInActiveSet = splitKeys(activeSet.keys);
+
+    // If 1 or fewer keys in the active set, no rotation is possible/needed
+    if (keysInActiveSet.length <= 1) {
+        console.log(`KeySwitcher: Rotation skipped for ${provider.name} (Set: ${activeSet.name}). Not enough keys (${keysInActiveSet.length}).`);
+        // Ensure the current key is set correctly if there's exactly one key
+        if (keysInActiveSet.length === 1) {
+             const currentActiveKey = await secretsFunctions.findSecret(provider.secret_key);
+             if (currentActiveKey !== keysInActiveSet[0]) {
+                 console.log(`KeySwitcher: Setting the single available key for ${provider.name} (Set: ${activeSet.name}) as active.`);
+                 await secretsFunctions.writeSecret(provider.secret_key, keysInActiveSet[0]);
+                 secrets.secret_state[provider.secret_key] = true; // Update global state
+                 secretsFunctions.updateSecretDisplay();
+             }
+        } else { // Zero keys
+            const currentActiveKey = await secretsFunctions.findSecret(provider.secret_key);
+            if (currentActiveKey) { // If a key is set but the set is empty, clear it
+                console.log(`KeySwitcher: Active set '${activeSet.name}' for ${provider.name} is empty. Clearing active key.`);
+                await secretsFunctions.writeSecret(provider.secret_key, "");
+                secrets.secret_state[provider.secret_key] = false;
+                 secretsFunctions.updateSecretDisplay();
+            }
+        }
+        // Update the info panel regardless, to show current state
+        await updateProviderInfoPanel(provider, data);
+        return;
+    }
+
+    // Find the currently active key in SillyTavern's main secret store
+    const currentKey = await secretsFunctions.findSecret(provider.secret_key) || "";
+    let newKey = "";
+
+    // Find the index of the current key within the active set's keys
+    const currentKeyIndexInSet = keysInActiveSet.indexOf(currentKey);
+
+    if (currentKeyIndexInSet !== -1) {
+        // Current key IS in the active set list. Rotate to the next one.
+        const nextKeyIndex = (currentKeyIndexInSet + 1) % keysInActiveSet.length; // Wrap around using modulo
+        newKey = keysInActiveSet[nextKeyIndex];
+    } else {
+        // Current key is NOT in the active set list (or it's empty).
+        // This could happen if the set was edited, or the key was removed manually, or it's the first load.
+        // Default to the first key in the active set.
+        console.log(`KeySwitcher: Current key '${currentKey}' not found in active set '${activeSet.name}' for ${provider.name}. Using first key.`);
+        newKey = keysInActiveSet[0];
+    }
+
+    // Only write the secret and update if the new key is different from the current one
+    if (newKey && newKey !== currentKey) {
+        console.log(`KeySwitcher: Rotating key for ${provider.name} (Set: ${activeSet.name}). From: '${currentKey || "N/A"}' To: '${newKey}'`);
+        await secretsFunctions.writeSecret(provider.secret_key, newKey);
+
+        // Update global secret state and display (like placeholders)
+        secrets.secret_state[provider.secret_key] = !!newKey;
+        secretsFunctions.updateSecretDisplay();
+
+        // Update our info panel display to show the newly rotated key
+        // (We need the latest data, although only the active key actually changed server-side)
+        await updateProviderInfoPanel(provider, data);
+
+        // Optionally: Update the main key input field value if visible (helps user see change)
+        const mainInput = document.getElementById(provider.input_id);
+        if (mainInput) {
+            mainInput.value = newKey;
+        }
+    } else {
+         console.log(`KeySwitcher: Rotation check for ${provider.name} (Set: ${activeSet.name}). No change needed. Current key: '${currentKey || "N/A"}'`);
+         // Still update panel in case initial load needed it
+         await updateProviderInfoPanel(provider, data);
+    }
 }
+
+/**
+ * Handles the removal of a specific key from the currently active set for a provider.
+ * Typically called when an API error indicates the key is invalid.
+ *
+ * @param {object} provider The provider object from PROVIDERS.
+ * @param {string} failedKey The API key that failed and should be removed.
+ * @returns {Promise<string|null>} The new key activated after removal, or null if no key was removed/no other keys are available.
+ */
 async function handleKeyRemoval(provider, failedKey) {
-    console.warn("KeySwitcher: handleKeyRemoval needs refactoring for set data!");
-    // TODO: Refactor this function to remove the failedKey from the ACTIVE SET's internal list
-    // and potentially activate the next key in that set (or null if empty).
-    return null; // Indicate removal failed/not implemented
+    console.log(`KeySwitcher: Attempting removal of key '${failedKey}' for ${provider.name}.`);
+
+    // Load the current set data
+    const loadedSecrets = await getSecrets();
+    if (!loadedSecrets) {
+        console.error(`KeySwitcher: Failed to get secrets during key removal for ${provider.name}. Aborting removal.`);
+        return null;
+    }
+    let data = loadSetData(provider, loadedSecrets); // Use 'let' as we might modify it
+
+    // Find the active set
+    const activeSetIndex = data.activeSetIndex;
+    const activeSet = data.sets[activeSetIndex];
+
+    if (!activeSet) {
+        console.error(`KeySwitcher: Active set index ${activeSetIndex} invalid for ${provider.name}. Cannot remove key.`);
+        return null;
+    }
+
+    // Get the keys from the active set string and find the index of the failed key
+    let keysInActiveSet = splitKeys(activeSet.keys);
+    const failedKeyIndex = keysInActiveSet.indexOf(failedKey);
+
+    // If the failed key wasn't found in the active set's list
+    if (failedKeyIndex === -1) {
+        console.warn(`KeySwitcher: Failed key '${failedKey}' not found in the list of keys for active set '${activeSet.name}' (${provider.name}). Key not removed from storage.`);
+        // Optional: Attempt a regular rotation as a fallback, hoping to find a working key?
+        // console.log(`KeySwitcher: Performing standard rotation instead.`);
+        // await handleKeyRotation(provider.secret_key); // Call the other refactored function
+        return null; // Return null because the *specific requested removal* didn't happen
+    }
+
+    // --- Key WAS found - Proceed with removal ---
+    console.log(`KeySwitcher: Found key '${failedKey}' at index ${failedKeyIndex} in active set '${activeSet.name}'. Removing...`);
+
+    // Remove the key from the array
+    keysInActiveSet.splice(failedKeyIndex, 1); // Remove 1 element at failedKeyIndex
+
+    // Update the keys string in the data object
+    data.sets[activeSetIndex].keys = keysInActiveSet.join('\n'); // Re-join remaining keys with newline
+
+    // --- Save the updated data structure back to secrets ---
+    try {
+        await saveSetData(provider, data);
+        console.log(`KeySwitcher: Successfully saved updated key list for set '${activeSet.name}' after removing '${failedKey}'.`);
+    } catch (error) {
+        console.error(`KeySwitcher: Failed to save updated set data for ${provider.name} after key removal. Error:`, error);
+        // Decide if we should still proceed with activating a new key or abort
+        return null; // Abort if saving failed
+    }
+
+    // --- Determine the next key to activate ---
+    let newKeyToActivate = null;
+    if (keysInActiveSet.length > 0) {
+        // If there are keys remaining, activate the one at the same index
+        // where the failed key WAS (which is now the next key), wrapping around.
+        const nextKeyIndex = failedKeyIndex % keysInActiveSet.length; // Modulo handles wrap-around and index shift after splice
+        newKeyToActivate = keysInActiveSet[nextKeyIndex];
+        console.log(`KeySwitcher: Activating next key at index ${nextKeyIndex}: '${newKeyToActivate}'`);
+    } else {
+        // The set is now empty after removing the last key
+        newKeyToActivate = ""; // Use empty string to clear the active key
+        console.log(`KeySwitcher: Active set '${activeSet.name}' is now empty after removing the last key.`);
+    }
+
+    // --- Activate the new key (or clear it) in SillyTavern's main secret ---
+    const currentActiveKey = await secretsFunctions.findSecret(provider.secret_key);
+    if (currentActiveKey !== newKeyToActivate) {
+         await secretsFunctions.writeSecret(provider.secret_key, newKeyToActivate);
+         secrets.secret_state[provider.secret_key] = !!newKeyToActivate; // Update global state based on new key
+         secretsFunctions.updateSecretDisplay();
+         console.log(`KeySwitcher: Updated active key for ${provider.name} to '${newKeyToActivate || "N/A"}'.`);
+
+         // Optionally update the main input field
+         const mainInput = document.getElementById(provider.input_id);
+         if (mainInput) mainInput.value = newKeyToActivate;
+
+    } else {
+        console.log(`KeySwitcher: The key to activate (${newKeyToActivate || "N/A"}) is already the active key. No change needed to main secret.`);
+        // Ensure UI reflects potential empty state if key removed was the only one
+        secrets.secret_state[provider.secret_key] = !!newKeyToActivate;
+        secretsFunctions.updateSecretDisplay();
+    }
+
+
+    // Update our info panel display to reflect the changes
+    await updateProviderInfoPanel(provider, data); // Use the modified data object
+
+    // Return the key that was activated
+    return newKeyToActivate;
 }
+
 
 // --- Redundant saveKey function (can be removed later) ---
 async function saveKey(key, value, updateDisplay = true) {
