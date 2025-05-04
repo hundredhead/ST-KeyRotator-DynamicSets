@@ -120,30 +120,90 @@ Object.values(PROVIDERS).forEach(provider => {
 
 // Show error information popup (Enhanced from original, kept as is for now)
 function showErrorPopup(provider, errorMessage, errorTitle = "API Error", wasKeyRemoved = false, removedKey = null) {
-    let popupContent = `<h3>${errorTitle}</h3>`;
+    // ... (popup header setup) ...
     let statusCode = null;
-    let detailedError = null;
+    let detailedError = null; // This is meant to hold the parsed { "code": ..., "message": ... } object
+
+    // 1. Extract Status Code (Seems okay for "429")
     const statusCodeMatch = errorMessage.match(/\b(\d{3})\b/);
     if (statusCodeMatch) statusCode = parseInt(statusCodeMatch[1], 10);
+
+    // 2. Extract and Parse JSON (This is the likely problem area)
     try {
-        const jsonMatch = errorMessage.match(/({.*})/);
-        if (jsonMatch && jsonMatch[1]) detailedError = JSON.parse(jsonMatch[1]).error;
-    } catch (e) { console.warn("Could not parse detailed error from message:", e); }
-    const providerMapping = PROVIDER_ERROR_MAPPINGS[provider?.secret_key];
-    if (providerMapping) popupContent += `<h4>Provider: ${providerMapping.name}</h4>`;
-    const currentKeyElement = document.getElementById(`current_key_${provider?.secret_key}`); // Use getElementById
-    if (currentKeyElement) popupContent += `<p><b>${currentKeyElement.textContent}</b></p>`;
+        // This regex tries to find the first '{' and grabs everything until the VERY LAST '}'
+        // In your example: "Google AI Studio API returned error: 429 ... { ... JSON ... }"
+        // It should correctly match the "{ ... JSON ... }" part.
+        const jsonMatch = errorMessage.match(/({.*})/s); // Added 's' flag just in case JSON has newlines
+
+        if (jsonMatch && jsonMatch[1]) {
+            const jsonString = jsonMatch[1];
+            console.log("KeySwitcher DEBUG: Attempting to parse JSON string:", jsonString); // Add this for debugging
+
+            // Parse the captured JSON string
+            const parsedJson = JSON.parse(jsonString);
+
+            // CRITICAL STEP: The code assumes the useful info is directly in parsedJson.error
+            // Google's structure is { "error": { "code": ..., "message": ... } }
+            // So, this line SHOULD work for the Google example.
+            if (parsedJson.error) {
+                 detailedError = parsedJson.error;
+                 console.log("KeySwitcher DEBUG: Successfully parsed .error object:", detailedError); // Debug log
+            } else {
+                 console.warn("KeySwitcher: Parsed JSON but found no '.error' key. Structure:", parsedJson);
+                 // Maybe try using the root object if it looks like error details?
+                 if (parsedJson.message && parsedJson.code) {
+                     detailedError = parsedJson;
+                 }
+                 // If other providers have different structures, add checks here.
+            }
+        } else {
+             console.log("KeySwitcher DEBUG: No JSON block found in error message regex match."); // Debug log
+        }
+    } catch (e) {
+        // Parsing FAILED. This is a common reason for seeing generic errors.
+        console.warn("KeySwitcher: Failed to parse JSON from error message. Error:", e);
+        if (jsonMatch && jsonMatch[1]) {
+             console.warn("KeySwitcher: The string that failed parsing was:", jsonMatch[1]);
+        }
+        detailedError = null; // Ensure it's null if parsing fails
+    }
+
+    // 3. Display Parsed Details (If detailedError is not null)
+    // ... (provider name, current key display) ...
+
     if (statusCode) {
         popupContent += `<p><b>Status Code:</b> ${statusCode}</p>`;
-        if (providerMapping && providerMapping.codes[statusCode]) popupContent += `<p><b>Possible Reason:</b> ${providerMapping.codes[statusCode]}</p>`;
+        // ... (display possible reason based on PROVIDER_ERROR_MAPPINGS) ...
     }
+
+    // Display the parsed details IF the above try/catch succeeded
     if (detailedError) {
+        // Uses the 'message' field from the parsed 'detailedError' object
         popupContent += `<p><b>API Message:</b> ${detailedError.message || 'N/A'}</p>`;
-        if (detailedError.type) popupContent += `<p><b>Type:</b> ${detailedError.type}</p>`;
+        // Tries 'type', then falls back to 'status' (for Google compatibility)
+        const errorTypeOrStatus = detailedError.type || detailedError.status;
+        if (errorTypeOrStatus) popupContent += `<p><b>Type/Status:</b> ${errorTypeOrStatus}</p>`;
+        // Uses the 'code' field from the parsed 'detailedError' object
         if (detailedError.code) popupContent += `<p><b>Code:</b> ${detailedError.code}</p>`;
+         // Optionally show the full 'details' array from Google
+         if (detailedError.details && Array.isArray(detailedError.details)) {
+             try { // Add try-catch around stringify just in case
+                 popupContent += `<p><b>Details:</b> <pre style="font-size: 0.9em; white-space: pre-wrap;">${JSON.stringify(detailedError.details, null, 2)}</pre></p>`
+             } catch (stringifyError) {
+                 console.warn("KeySwitcher: Failed to stringify error details array:", stringifyError);
+                 popupContent += `<p><b>Details:</b> (Failed to display details array)</p>`;
+             }
+         }
+    } else {
+         // Add a message indicating parsing failed
+         popupContent += `<p style='color: orange;'><i>Could not parse specific details from the error message.</i></p>`;
     }
-    if (wasKeyRemoved && removedKey) popupContent += `<p style='color: red; font-weight: bold; margin-top: 10px;'>The failing API key (${removedKey}) has been automatically removed from the active set's internal list. Please try generating again.</p>`; // Updated text
+
+    // ... (display key removal message if applicable) ...
+
+    // Always display the raw error message at the end
     popupContent += `<hr><p><b>Raw Error Message:</b></p><pre style="white-space: pre-wrap; word-wrap: break-word;">${errorMessage}</pre>`;
+
     popupFunctions.callGenericPopup(popupContent, popupFunctions.POPUP_TYPE.TEXT, "", { large: true, wide: true, allowVerticalScrolling: true });
 }
 
